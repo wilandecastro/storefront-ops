@@ -14,15 +14,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
-          cache-dependency-path: storefront-ops/package-lock.json
+          cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: cd storefront-ops && npm ci
+        run: npm ci
       - name: Lint
-        run: cd storefront-ops && npm run lint
+        run: npm run lint
       - name: Run Tests
-        run: cd storefront-ops && npm run test -- --run
+        run: npm run test -- --run
 
   lighthouse-audit:
     runs-on: ubuntu-latest
@@ -32,17 +32,17 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
-          cache-dependency-path: storefront-ops/package-lock.json
+          cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: cd storefront-ops && npm ci
+        run: npm ci
       - name: Build
-        run: cd storefront-ops && npm run build
+        run: npm run build
       - name: Run Lighthouse
         uses: treosh/lighthouse-ci-action@v12
         with:
-          configPath: './storefront-ops/.lighthouserc.js'
+          configPath: './.lighthouserc.js'
           uploadArtifacts: true
           temporaryPublicStorage: true
 
@@ -50,14 +50,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Dependency Review
         if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@v4
       - name: npm Audit
-        run: cd storefront-ops && npm audit --audit-level=high
+        run: npm audit --audit-level=critical
 
   build-and-push:
-    needs: [lint-and-test, security-scan]
+    needs: [lint-and-test, security-scan, lighthouse-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -80,8 +84,11 @@ jobs:
           ECR_REPOSITORY: storefront-ops
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          cd storefront-ops
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Update Amazon ECS service
+        run: |
+          aws ecs update-service --cluster storefront-ops-cluster --service storefront-ops-service --force-new-deployment
